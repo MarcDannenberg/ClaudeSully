@@ -1,0 +1,107 @@
+# Sully UI - Setup and Usage Instructions
+
+This document provides instructions for setting up and using the Sully document processing interface.
+
+## Setup Instructions
+
+### Prerequisites
+
+- Python 3.8 or higher
+- FastAPI
+- Uvicorn
+- Required Python packages (listed in requirements.txt)
+- Sully system installed (or the mock implementation will be used)
+
+### Installation Steps
+
+1. **Clone or download the code files**
+
+   Save both the HTML UI file and the Python API file to your local system.
+
+2. **Create project structure**
+
+   ```
+   sully-ui/
+   ├── static/
+   │   └── index.html      # The UI file
+   ├── sully_api.py        # The API file
+   ├── requirements.txt    # Dependencies
+   └── uploads/            # Will be created automatically
+   ```
+
+3. **Install required dependencies**
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Start the server**
+
+   ```bash
+   python sully_api.py
+   ```
+
+   The server will start on http://localhost:8000
+
+5. **Access the UI**
+
+   Open your browser and go to http://localhost:8000
+
+## Usage Instructions
+
+### Document Upload
+
+1. **Select documents**
+   - Click the drop zone or drag and drop files into the designated area
+   - Supported file types include PDF, DOCX, TXT, CSV, EPUB, and more
+
+2. **Start processing**
+   - Click the "Process Documents" button to begin
+   - You can see processing progress for both individual documents and the overall queue
+
+3. **View results**
+   - The system will notify you when each document is processed
+   - Activity logs show a history of all document processing events
+
+### Settings
+
+Click the "Settings" button to customize:
+
+- **API Endpoint**: The server endpoint for document processing
+- **Processing Mode**: Choose between standard, detailed analysis, or quick scan
+- **Notifications**: Enable/disable browser notifications
+- **Auto Process**: Automatically process documents as soon as they're uploaded
+
+### Advanced Features
+
+- **Batch Processing**: Upload multiple documents at once
+- **Processing Status**: Monitor the status of all documents in real-time
+- **Error Handling**: The system will notify you of any processing errors
+
+## Integrating with Sully
+
+The UI communicates with Sully through the FastAPI backend. If you have the Sully system installed, it will utilize its document processing capabilities. Otherwise, it will use a mock implementation for testing purposes.
+
+To integrate with your actual Sully installation:
+
+1. Ensure the Sully module is importable in your Python environment
+2. The API will automatically use the actual Sully system if available
+3. The `ingest_document` method of Sully is used to process each document
+
+## Troubleshooting
+
+- **File Upload Issues**: Ensure the uploads directory has appropriate write permissions
+- **Processing Errors**: Check the server logs for detailed error information
+- **UI Not Loading**: Verify the API server is running and accessible
+- **Sully Integration**: Ensure the Sully module is properly installed and initialized
+
+## Security Considerations
+
+This implementation is intended for development and testing. For production use:
+
+- Implement user authentication
+- Add file type validation and size limits
+- Configure proper CORS settings
+- Use HTTPS for all communications
+- Implement rate limiting
+- Add proper error handling and logging
