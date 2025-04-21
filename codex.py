@@ -1,4 +1,881 @@
-# Check tags
+# sully_engine/codex.py
+# 📚 Sully's Symbolic Codex (Knowledge Repository)
+
+from datetime import datetime
+import json
+import re
+import uuid
+import numpy as np
+import logging
+from typing import Dict, List, Any, Optional, Union, Set, Tuple
+from collections import Counter, defaultdict, deque
+from dataclasses import dataclass, asdict
+from enum import Enum
+
+# Setup logging
+logger = logging.getLogger(__name__)
+
+class ConceptType(Enum):
+    """Types of concepts that can be stored in the codex."""
+    TERM = "term"
+    ENTITY = "entity"
+    CONCEPT = "concept"
+    CATEGORY = "category"
+    PROCESS = "process"
+    EVENT = "event"
+    RELATION = "relation"
+    CUSTOM = "custom"
+
+class RelationType(Enum):
+    """Types of relationships between concepts."""
+    IS_A = "is_a"
+    PART_OF = "part_of"
+    HAS_PROPERTY = "has_property"
+    RELATED_TO = "related_to"
+    CAUSES = "causes"
+    PRECEDES = "precedes"
+    IMPLIES = "implies"
+    OPPOSITE_OF = "opposite_of"
+    SIMILAR_TO = "similar_to"
+    INSTANCE_OF = "instance_of"
+    LOCATED_IN = "located_in"
+    USED_FOR = "used_for"
+    CUSTOM = "custom"
+
+class EvidenceType(Enum):
+    """Types of evidence supporting a concept or relation."""
+    OBSERVED = "observed"
+    INFERRED = "inferred"
+    DERIVED = "derived"
+    LEARNED = "learned"
+    HUMAN_PROVIDED = "human_provided"
+    UNCERTAIN = "uncertain"
+
+@dataclass
+class ConceptRelation:
+    """Represents a relationship between two concepts."""
+    relation_type: str
+    target_concept: str
+    confidence: float = 1.0
+    metadata: Dict[str, Any] = None
+    bidirectional: bool = False
+    created: float = None
+    
+    def __post_init__(self):
+        """Initialize default values."""
+        if self.metadata is None:
+            self.metadata = {}
+        if self.created is None:
+            self.created = datetime.now().timestamp()
+
+@dataclass
+class VersionInfo:
+    """Information about a specific version of a concept."""
+    timestamp: float
+    data: Dict[str, Any]
+    change_description: str
+    version_number: int
+
+@dataclass
+class VersionHistory:
+    """Version history for a concept."""
+    current_version: int = 1
+    versions: List[VersionInfo] = None
+    
+    def __post_init__(self):
+        """Initialize default values."""
+        if self.versions is None:
+            self.versions = []
+
+@dataclass
+class ConceptCluster:
+    """A cluster of related concepts."""
+    id: str
+    name: str
+    concepts: List[str]
+    description: Optional[str] = None
+    metadata: Dict[str, Any] = None
+    created: float = None
+    
+    def __post_init__(self):
+        """Initialize default values."""
+        if self.metadata is None:
+            self.metadata = {}
+        if self.created is None:
+            self.created = datetime.now().timestamp()
+
+@dataclass
+class AccessStatistics:
+    """Statistics about concept access and usage."""
+    access_count: int = 0
+    last_accessed: Optional[float] = None
+    creation_time: Optional[float] = None
+    modification_count: int = 0
+    relation_reference_count: int = 0
+    search_hit_count: int = 0
+    importance_score: float = 0.5
+    
+    def record_access(self):
+        """Record an access to this concept."""
+        self.access_count += 1
+        self.last_accessed = datetime.now().timestamp()
+        
+    def record_modification(self):
+        """Record a modification to this concept."""
+        self.modification_count += 1
+        self.last_accessed = datetime.now().timestamp()
+        
+    def record_relation_reference(self):
+        """Record a reference to this concept in a relation."""
+        self.relation_reference_count += 1
+        
+    def record_search_hit(self):
+        """Record a search hit for this concept."""
+        self.search_hit_count += 1
+
+class SullyCodex:
+    """
+    Stores and organizes Sully's symbolic knowledge, concepts, and their relationships.
+    Functions as both a lexicon and a semantic network of interconnected meanings.
+    """
+
+    def __init__(self, vector_dimensions: int = 128):
+        """
+        Initialize an empty knowledge repository.
+        
+        Args:
+            vector_dimensions: Dimensionality of concept vectors
+        """
+        # Primary data storage
+        self.entries = {}  # Map of concept_id -> concept data
+        self.terms = {}    # Map of normalized term -> concept_id
+        
+        # Relationship storage
+        self.relations = {}           # Source concept -> list of relations
+        self.inverse_relations = {}   # Target concept -> list of relations
+        self.associations = {}        # Map of topic -> related topics with association info
+        
+        # Indexing for fast lookup
+        self.type_index = defaultdict(set)     # Concept type -> set of concept IDs
+        self.domain_index = defaultdict(set)   # Domain -> set of concept IDs
+        self.tag_index = defaultdict(set)      # Tag -> set of concept IDs
+        
+        # Vector space for semantic operations
+        self.vector_dimensions = vector_dimensions
+        self.concept_vectors = {}     # Concept ID -> vector representation
+        
+        # Organization structures
+        self.concept_clusters = {}    # Cluster ID -> ConceptCluster
+        
+        # Metadata
+        self.metadata = {
+            "created": datetime.now().timestamp(),
+            "last_modified": datetime.now().timestamp(),
+            "version": "1.0.0"
+        }
+        
+        # Version tracking
+        self.version_history = {}     # Concept ID -> VersionHistory
+        
+        # Usage statistics
+        self.access_stats = {}        # Concept ID -> AccessStatistics
+        
+        # Inference system
+        self.inference_rules = []     # Rules for deriving new relations
+        self.contradictions = []      # Detected contradictions
+        
+        # Initialize default inference rules
+        self._initialize_inference_rules()
+
+    def record(self, topic: str, data: Dict[str, Any], 
+              concept_type: Union[ConceptType, str] = None, 
+              domains: List[str] = None, 
+              tags: List[str] = None,
+              confidence: float = 0.7, 
+              evidence: List[str] = None) -> str:
+        """
+        Records a new concept in the codex.
+        
+        Args:
+            topic: The concept topic or name
+            data: Associated data or properties
+            concept_type: Type of concept (term, entity, etc.)
+            domains: List of domains the concept belongs to
+            tags: List of tags for the concept
+            confidence: Confidence score (0.0 to 1.0)
+            evidence: List of evidence types supporting the concept
+            
+        Returns:
+            ID of the recorded concept
+        """
+        if not topic or not isinstance(data, dict):
+            raise ValueError("Topic must be a non-empty string and data must be a dictionary")
+        
+        # Generate a unique ID for the concept
+        concept_id = str(uuid.uuid4())
+        normalized_topic = topic.lower()
+        
+        # Set default concept type if not provided
+        if concept_type is None:
+            concept_type = ConceptType.CONCEPT
+        
+        # Convert string enum to proper enum
+        if isinstance(concept_type, str):
+            try:
+                concept_type = ConceptType(concept_type)
+            except ValueError:
+                # Use as custom type
+                pass
+        
+        type_value = concept_type.value if isinstance(concept_type, ConceptType) else concept_type
+        
+        # Prepare the concept entry
+        concept = {
+            "id": concept_id,
+            "topic": topic,
+            "normalized_topic": normalized_topic,
+            "type": type_value,
+            "data": data,
+            "domains": domains or [],
+            "tags": tags or [],
+            "created": datetime.now().timestamp(),
+            "modified": datetime.now().timestamp(),
+            "confidence": {
+                "overall": confidence,
+                "evidence": evidence or [EvidenceType.HUMAN_PROVIDED.value]
+            }
+        }
+        
+        # Store the concept
+        self.entries[concept_id] = concept
+        
+        # Index by normalized topic
+        self.terms[normalized_topic] = concept_id
+        
+        # Index by type
+        self.type_index[type_value].add(concept_id)
+        
+        # Index by domains
+        for domain in concept.get("domains", []):
+            self.domain_index[domain.lower()].add(concept_id)
+        
+        # Index by tags
+        for tag in concept.get("tags", []):
+            self.tag_index[tag.lower()].add(concept_id)
+        
+        # Create associations with existing concepts
+        self._create_associations(concept_id, concept)
+        
+        # Create a vector representation
+        self.concept_vectors[concept_id] = self._generate_concept_vector(concept)
+        
+        # Initialize version history
+        self.version_history[concept_id] = VersionHistory(
+            current_version=1,
+            versions=[
+                VersionInfo(
+                    timestamp=concept["created"],
+                    data=dict(concept),
+                    change_description="Initial creation",
+                    version_number=1
+                )
+            ]
+        )
+        
+        # Initialize access statistics
+        self.access_stats[concept_id] = AccessStatistics(
+            creation_time=concept["created"],
+            last_accessed=concept["created"]
+        )
+        
+        # Update system metadata
+        self.metadata["last_modified"] = concept["created"]
+        
+        return concept_id
+
+    def _create_associations(self, concept_id: str, concept: Dict[str, Any]) -> None:
+        """
+        Create semantic associations between this concept and existing concepts.
+        
+        Args:
+            concept_id: ID of the concept to create associations for
+            concept: The concept data
+        """
+        # Extract potential keywords from the concept
+        keywords = set()
+        topic_words = [w.lower() for w in re.findall(r'\b\w+\b', concept["topic"]) if len(w) > 3]
+        keywords.update(topic_words)
+        
+        for value in concept["data"].values():
+            if isinstance(value, str):
+                words = [w.lower() for w in re.findall(r'\b\w+\b', value) if len(w) > 3]
+                keywords.update(words)
+        
+        # Add domains and tags
+        for domain in concept.get("domains", []):
+            domain_words = [w.lower() for w in re.findall(r'\b\w+\b', domain) if len(w) > 3]
+            keywords.update(domain_words)
+            
+        for tag in concept.get("tags", []):
+            tag_words = [w.lower() for w in re.findall(r'\b\w+\b', tag) if len(w) > 3]
+            keywords.update(tag_words)
+        
+        if not concept_id in self.associations:
+            self.associations[concept_id] = {}
+            
+        # Look for matches in existing entries
+        for existing_id, existing_concept in self.entries.items():
+            # Skip self
+            if existing_id == concept_id:
+                continue
+                
+            # Skip if already has an association
+            if existing_id in self.associations.get(concept_id, {}):
+                continue
+                
+            # Extract existing concept keywords
+            existing_keywords = set()
+            existing_topic_words = [w.lower() for w in re.findall(r'\b\w+\b', existing_concept["topic"]) if len(w) > 3]
+            existing_keywords.update(existing_topic_words)
+            
+            for value in existing_concept["data"].values():
+                if isinstance(value, str):
+                    words = [w.lower() for w in re.findall(r'\b\w+\b', value) if len(w) > 3]
+                    existing_keywords.update(words)
+            
+            # Add domains and tags
+            for domain in existing_concept.get("domains", []):
+                domain_words = [w.lower() for w in re.findall(r'\b\w+\b', domain) if len(w) > 3]
+                existing_keywords.update(domain_words)
+                
+            for tag in existing_concept.get("tags", []):
+                tag_words = [w.lower() for w in re.findall(r'\b\w+\b', tag) if len(w) > 3]
+                existing_keywords.update(tag_words)
+            
+            # Check for keyword overlap
+            common_keywords = keywords.intersection(existing_keywords)
+            
+            if common_keywords:
+                # Calculate association strength based on overlap
+                strength = len(common_keywords) / max(len(keywords), len(existing_keywords))
+                
+                if strength > 0.1:  # Minimum threshold for association
+                    self._add_association(concept_id, existing_id, "keyword_overlap", {
+                        "strength": strength,
+                        "common_keywords": list(common_keywords)
+                    })
+            
+            # Check for domain overlap
+            concept_domains = set(d.lower() for d in concept.get("domains", []))
+            existing_domains = set(d.lower() for d in existing_concept.get("domains", []))
+            common_domains = concept_domains.intersection(existing_domains)
+            
+            if common_domains:
+                self._add_association(concept_id, existing_id, "domain_overlap", {
+                    "strength": len(common_domains) / max(len(concept_domains), len(existing_domains)),
+                    "common_domains": list(common_domains)
+                })
+            
+            # Check for tag overlap
+            concept_tags = set(t.lower() for t in concept.get("tags", []))
+            existing_tags = set(t.lower() for t in existing_concept.get("tags", []))
+            common_tags = concept_tags.intersection(existing_tags)
+            
+            if common_tags:
+                self._add_association(concept_id, existing_id, "tag_overlap", {
+                    "strength": len(common_tags) / max(len(concept_tags), len(existing_tags)),
+                    "common_tags": list(common_tags)
+                })
+
+    def _add_association(self, concept1_id: str, concept2_id: str, 
+                       assoc_type: str, details: Dict[str, Any] = None) -> None:
+        """
+        Add a bidirectional association between two concepts.
+        
+        Args:
+            concept1_id: First concept ID
+            concept2_id: Second concept ID
+            assoc_type: Type of association
+            details: Additional details about the association
+        """
+        if concept1_id == concept2_id:
+            return  # Skip self-association
+            
+        if concept1_id not in self.associations:
+            self.associations[concept1_id] = {}
+            
+        if concept2_id not in self.associations:
+            self.associations[concept2_id] = {}
+            
+        # Add bidirectional association
+        self.associations[concept1_id][concept2_id] = {
+            "type": assoc_type,
+            "details": details or {},
+            "created": datetime.now().timestamp()
+        }
+        
+        self.associations[concept2_id][concept1_id] = {
+            "type": assoc_type,
+            "details": details or {},
+            "created": datetime.now().timestamp()
+        }
+
+    def update(self, concept_id: str, updates: Dict[str, Any], 
+             change_description: str = "Updated concept") -> Dict[str, Any]:
+        """
+        Update an existing concept with new data.
+        
+        Args:
+            concept_id: ID of the concept to update
+            updates: Dictionary of updates to apply
+            change_description: Description of the changes
+            
+        Returns:
+            Updated concept data
+        """
+        if concept_id not in self.entries:
+            raise ValueError(f"Concept with ID '{concept_id}' not found")
+            
+        # Get the concept
+        concept = self.entries[concept_id]
+        old_concept = dict(concept)  # Copy for version history
+        
+        # Apply updates
+        for key, value in updates.items():
+            if key == "data":
+                # Merge data dictionaries
+                concept["data"].update(value)
+            elif key in ["domains", "tags"]:
+                # Replace list fields
+                concept[key] = value
+            elif key == "confidence":
+                # Update confidence information
+                if isinstance(value, dict):
+                    concept["confidence"].update(value)
+                else:
+                    concept["confidence"]["overall"] = float(value)
+            else:
+                # Direct field update
+                concept[key] = value
+        
+        # Update modification timestamp
+        concept["modified"] = datetime.now().timestamp()
+        
+        # Re-index if type changed
+        if updates.get("type") and updates["type"] != old_concept["type"]:
+            self.type_index[old_concept["type"]].discard(concept_id)
+            self.type_index[concept["type"]].add(concept_id)
+        
+        # Re-index if domains changed
+        if "domains" in updates:
+            # Remove from old domains
+            for domain in old_concept.get("domains", []):
+                self.domain_index[domain.lower()].discard(concept_id)
+                
+            # Add to new domains
+            for domain in concept["domains"]:
+                self.domain_index[domain.lower()].add(concept_id)
+        
+        # Re-index if tags changed
+        if "tags" in updates:
+            # Remove from old tags
+            for tag in old_concept.get("tags", []):
+                self.tag_index[tag.lower()].discard(concept_id)
+                
+            # Add to new tags
+            for tag in concept["tags"]:
+                self.tag_index[tag.lower()].add(concept_id)
+        
+        # Update version history
+        if concept_id in self.version_history:
+            history = self.version_history[concept_id]
+            history.current_version += 1
+            
+            history.versions.append(VersionInfo(
+                timestamp=concept["modified"],
+                data=dict(concept),
+                change_description=change_description,
+                version_number=history.current_version
+            ))
+        
+        # Update vector representation
+        self.concept_vectors[concept_id] = self._generate_concept_vector(concept)
+        
+        # Update access statistics
+        if concept_id in self.access_stats:
+            self.access_stats[concept_id].record_modification()
+        
+        # Update system metadata
+        self.metadata["last_modified"] = concept["modified"]
+        
+        return concept
+
+    def get(self, identifier: str, include_associations: bool = False, 
+          include_relations: bool = False) -> Dict[str, Any]:
+        """
+        Get a concept by ID or topic.
+        
+        Args:
+            identifier: Concept ID or topic
+            include_associations: Whether to include semantic associations
+            include_relations: Whether to include formal relations
+            
+        Returns:
+            Concept data or error message
+        """
+        concept_id = self._resolve_concept_identifier(identifier)
+        
+        if not concept_id:
+            return {"error": f"Concept '{identifier}' not found"}
+            
+        # Get the concept
+        concept = self.entries[concept_id]
+        result = dict(concept)
+        
+        # Update access statistics
+        if concept_id in self.access_stats:
+            self.access_stats[concept_id].record_access()
+        
+        # Include associations if requested
+        if include_associations and concept_id in self.associations:
+            result["associations"] = {}
+            
+            for related_id, assoc_data in self.associations[concept_id].items():
+                if related_id in self.entries:
+                    related = self.entries[related_id]
+                    result["associations"][related_id] = {
+                        "topic": related["topic"],
+                        "type": related["type"],
+                        "association_type": assoc_data["type"],
+                        "details": assoc_data["details"]
+                    }
+        
+        # Include relations if requested
+        if include_relations:
+            # Outgoing relations
+            if concept_id in self.relations:
+                result["relations"] = {
+                    "outgoing": [asdict(r) for r in self.relations[concept_id]]
+                }
+                
+            # Incoming relations
+            if concept_id in self.inverse_relations:
+                if "relations" not in result:
+                    result["relations"] = {}
+                result["relations"]["incoming"] = [asdict(r) for r in self.inverse_relations[concept_id]]
+        
+        return result
+
+    def add_word(self, term: str, meaning: str) -> str:
+        """
+        Add a term definition to the codex.
+        
+        Args:
+            term: The term to define
+            meaning: The definition or meaning
+            
+        Returns:
+            ID of the created concept
+        """
+        if not term or not meaning:
+            raise ValueError("Term and meaning must be non-empty strings")
+            
+        return self.record(
+            topic=term,
+            data={"definition": meaning},
+            concept_type=ConceptType.TERM
+        )
+    
+    def add_context(self, term: str, context: str) -> None:
+        """
+        Adds a usage context for a term to enrich its understanding.
+        
+        Args:
+            term: The term to add context for
+            context: A sample sentence or context where the term is used
+        """
+        if not term or not context:
+            return  # Skip empty terms or contexts
+            
+        normalized_term = term.lower()
+        if normalized_term in self.terms:
+            concept_id = self.terms[normalized_term]
+            concept = self.entries[concept_id]
+            
+            # Add to contexts list
+            contexts = concept["data"].get("contexts", [])
+            if context not in contexts:
+                contexts.append(context)
+                
+                # Update the concept
+                self.update(
+                    concept_id=concept_id,
+                    updates={"data": {"contexts": contexts}},
+                    change_description=f"Added context: '{context[:50]}...'"
+                )
+
+    def add_relation(self, source_id: str, target_identifier: str, 
+                   relation_type: Union[RelationType, str], 
+                   confidence: float = 0.8, 
+                   metadata: Dict[str, Any] = None,
+                   bidirectional: bool = False,
+                   inferred: bool = False) -> Dict[str, Any]:
+        """
+        Add a formal relation between two concepts.
+        
+        Args:
+            source_id: ID of the source concept
+            target_identifier: ID or topic of the target concept
+            relation_type: Type of relation
+            confidence: Confidence in the relation (0.0 to 1.0)
+            metadata: Additional metadata about the relation
+            bidirectional: Whether the relation is bidirectional
+            inferred: Whether the relation was inferred
+            
+        Returns:
+            Information about the created relation
+        """
+        if source_id not in self.entries:
+            raise ValueError(f"Source concept with ID '{source_id}' not found")
+            
+        # Resolve target identifier
+        target_id = self._resolve_concept_identifier(target_identifier)
+        if not target_id:
+            raise ValueError(f"Target concept '{target_identifier}' not found")
+            
+        # Skip self-reference unless explicitly allowed in metadata
+        if source_id == target_id and not (metadata and metadata.get("allow_self_reference")):
+            raise ValueError("Cannot create a relation from a concept to itself")
+        
+        # Convert relation type if needed
+        if isinstance(relation_type, RelationType):
+            relation_type = relation_type.value
+        
+        # Create metadata if none
+        if metadata is None:
+            metadata = {}
+            
+        # Add creation metadata
+        metadata["created_at"] = datetime.now().timestamp()
+        if inferred:
+            metadata["inferred"] = True
+        
+        # Create the relation
+        relation = ConceptRelation(
+            relation_type=relation_type,
+            target_concept=target_id,
+            confidence=confidence,
+            metadata=metadata,
+            bidirectional=bidirectional,
+            created=metadata["created_at"]
+        )
+        
+        # Add to relations
+        if source_id not in self.relations:
+            self.relations[source_id] = []
+            
+        # Check for duplicate relations
+        for existing in self.relations[source_id]:
+            if existing.relation_type == relation.relation_type and existing.target_concept == relation.target_concept:
+                return {
+                    "error": "Duplicate relation",
+                    "existing": asdict(existing)
+                }
+        
+        self.relations[source_id].append(relation)
+        
+        # Add to inverse relations for target
+        if target_id not in self.inverse_relations:
+            self.inverse_relations[target_id] = []
+            
+        inverse_relation = ConceptRelation(
+            relation_type=relation_type,
+            target_concept=source_id,
+            confidence=confidence,
+            metadata={**metadata, "inverse": True},
+            bidirectional=bidirectional,
+            created=metadata["created_at"]
+        )
+        
+        self.inverse_relations[target_id].append(inverse_relation)
+        
+        # Update access statistics
+        if source_id in self.access_stats:
+            self.access_stats[source_id].record_relation_reference()
+            
+        if target_id in self.access_stats:
+            self.access_stats[target_id].record_relation_reference()
+        
+        # For bidirectional relations, create the reverse relation as well
+        if bidirectional:
+            # Create the reverse relation
+            reverse_relation = ConceptRelation(
+                relation_type=relation_type,
+                target_concept=source_id,
+                confidence=confidence,
+                metadata={**metadata, "bidirectional_pair": True},
+                bidirectional=True,
+                created=metadata["created_at"]
+            )
+            
+            # Add to relations
+            if target_id not in self.relations:
+                self.relations[target_id] = []
+                
+            self.relations[target_id].append(reverse_relation)
+            
+            # Add to inverse relations for source
+            if source_id not in self.inverse_relations:
+                self.inverse_relations[source_id] = []
+                
+            inverse_reverse = ConceptRelation(
+                relation_type=relation_type,
+                target_concept=target_id,
+                confidence=confidence,
+                metadata={**metadata, "inverse": True, "bidirectional_pair": True},
+                bidirectional=True,
+                created=metadata["created_at"]
+            )
+            
+            self.inverse_relations[source_id].append(inverse_reverse)
+        
+        # Run inference if this is a new relation
+        if not inferred:
+            self._run_inference_for_relation(source_id, target_id, relation_type)
+        
+        # Update system metadata
+        self.metadata["last_modified"] = datetime.now().timestamp()
+        
+        return {
+            "source": {
+                "id": source_id,
+                "topic": self.entries[source_id]["topic"]
+            },
+            "target": {
+                "id": target_id,
+                "topic": self.entries[target_id]["topic"]
+            },
+            "relation_type": relation_type,
+            "bidirectional": bidirectional,
+            "confidence": confidence
+        }
+
+    def search(self, query: str, concept_types: List[str] = None, 
+             domains: List[str] = None, tags: List[str] = None,
+             semantic: bool = True, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        Search for concepts matching the query.
+        
+        Args:
+            query: Search query string
+            concept_types: Optional list of concept types to filter by
+            domains: Optional list of domains to filter by
+            tags: Optional list of tags to filter by
+            semantic: Whether to use semantic search
+            limit: Maximum number of results to return
+            
+        Returns:
+            List of matching concepts
+        """
+        if not query or not query.strip():
+            return []
+            
+        # Normalize query
+        query = query.strip().lower()
+        
+        # Prepare date range filter (not used in basic implementation)
+        date_range = None
+        
+        # Prepare confidence filter (not used in basic implementation)
+        min_confidence = 0.0
+        
+        # Start with keyword search
+        results = self._keyword_search(
+            query, concept_types, domains, tags, date_range, min_confidence
+        )
+        
+        # Add semantic search results if enabled and we have vector representations
+        if semantic and self.concept_vectors and len(query) > 3:
+            semantic_results = self._semantic_search(
+                query, concept_types, domains, tags, date_range, min_confidence
+            )
+            
+            # Merge results
+            existing_ids = {r["id"] for r in results}
+            for result in semantic_results:
+                if result["id"] not in existing_ids:
+                    results.append(result)
+                    existing_ids.add(result["id"])
+        
+        # Update access statistics for results
+        for result in results:
+            concept_id = result["id"]
+            if concept_id in self.access_stats:
+                self.access_stats[concept_id].record_search_hit()
+        
+        # Sort by relevance
+        results.sort(key=lambda x: x["relevance"], reverse=True)
+        
+        # Apply limit
+        if limit > 0:
+            results = results[:limit]
+            
+        return results
+
+    def _keyword_search(self, query: str, concept_types: List[str] = None,
+                      domains: List[str] = None, tags: List[str] = None,
+                      date_range: Tuple[float, float] = None,
+                      min_confidence: float = 0.0) -> List[Dict[str, Any]]:
+        """
+        Perform keyword-based search.
+        
+        Args:
+            query: Search query
+            concept_types: Optional list of concept types to filter by
+            domains: Optional list of domains to filter by
+            tags: Optional list of tags to filter by
+            date_range: Optional (start, end) timestamps to filter by
+            min_confidence: Minimum confidence threshold
+            
+        Returns:
+            List of search results
+        """
+        # Extract keywords from query
+        keywords = [kw.lower() for kw in re.findall(r'\b\w+\b', query) if len(kw) > 2]
+        if not keywords:
+            keywords = [query.lower()]
+            
+        results = {}  # concept_id -> result dict
+        
+        # Search in all concepts
+        for concept_id, concept in self.entries.items():
+            # Apply filters
+            if not self._passes_filters(concept, concept_types, domains, tags, date_range, min_confidence):
+                continue
+                
+            # Track matched field types for explanation
+            match_types = []
+            relevance = 0.0
+            
+            # Check topic match
+            topic_relevance = self._keyword_relevance(keywords, concept["topic"])
+            if topic_relevance > 0:
+                relevance += topic_relevance * 1.5  # Weight topic matches higher
+                match_types.append("topic")
+            
+            # Check in data values
+            data_relevance = 0
+            for field, value in concept["data"].items():
+                if isinstance(value, str):
+                    field_match = self._keyword_relevance(keywords, value)
+                    if field_match > 0:
+                        data_relevance = max(data_relevance, field_match)
+                        match_types.append(f"data.{field}")
+            
+            if data_relevance > 0:
+                relevance += data_relevance
+                
+            # Check tags
             tag_relevance = 0
             for tag in concept.get("tags", []):
                 tag_match = self._keyword_relevance(keywords, tag)
@@ -106,13 +983,13 @@
         # Check domain filter
         if domains:
             concept_domains = [d.lower() for d in concept.get("domains", [])]
-            if not any(d in concept_domains for d in domains):
+            if not any(d.lower() in concept_domains for d in domains):
                 return False
         
         # Check tag filter
         if tags:
             concept_tags = [t.lower() for t in concept.get("tags", [])]
-            if not any(t in concept_tags for t in tags):
+            if not any(t.lower() in concept_tags for t in tags):
                 return False
         
         # Check date range filter
@@ -413,7 +1290,7 @@
         self.concept_clusters[cluster_id] = cluster
         
         # Update system metadata
-        self.metadata["last_modified"] = datetime.datetime.now().timestamp()
+        self.metadata["last_modified"] = datetime.now().timestamp()
         
         return cluster_id
     
@@ -443,7 +1320,7 @@
         cluster.concepts.extend(valid_ids)
         
         # Update system metadata
-        self.metadata["last_modified"] = datetime.datetime.now().timestamp()
+        self.metadata["last_modified"] = datetime.now().timestamp()
         
         return {
             "id": cluster_id,
@@ -478,7 +1355,7 @@
         cluster.concepts = [cid for cid in cluster.concepts if cid not in to_remove]
         
         # Update system metadata
-        self.metadata["last_modified"] = datetime.datetime.now().timestamp()
+        self.metadata["last_modified"] = datetime.now().timestamp()
         
         return {
             "id": cluster_id,
@@ -561,7 +1438,7 @@
         del self.concept_clusters[cluster_id]
         
         # Update system metadata
-        self.metadata["last_modified"] = datetime.datetime.now().timestamp()
+        self.metadata["last_modified"] = datetime.now().timestamp()
         
         return True
     
@@ -595,26 +1472,26 @@
         
         # Sort concepts by importance for better cluster seeds
         sorted_concepts = sorted(
-            concept_ids, 
-            key=lambda cid: self.access_stats.get(cid, AccessStatistics()).importance_score,
+            [(cid, self.access_stats.get(cid, AccessStatistics()).importance_score) for cid in concept_ids],
+            key=lambda x: x[1],
             reverse=True
         )
         
-        for seed_id in sorted_concepts:
+        for concept_id, _ in sorted_concepts:
             # Skip if already assigned to a cluster
-            if seed_id in assigned:
+            if concept_id in assigned:
                 continue
                 
             # Skip if no vector
-            if seed_id not in self.concept_vectors:
+            if concept_id not in self.concept_vectors:
                 continue
                 
             # Create a new cluster
-            cluster_members = [seed_id]
-            assigned.add(seed_id)
+            cluster_members = [concept_id]
+            assigned.add(concept_id)
             
             # Find similar concepts
-            seed_vector = self.concept_vectors[seed_id]
+            seed_vector = self.concept_vectors[concept_id]
             
             for other_id in concept_ids:
                 # Skip if already assigned or no vector
@@ -644,7 +1521,7 @@
                     "id": cluster_id,
                     "name": cluster_name,
                     "size": len(cluster_members),
-                    "seed_concept": self.entries[seed_id]["topic"]
+                    "seed_concept": self.entries[concept_id]["topic"]
                 })
                 
                 # Stop if we've reached the maximum number of clusters
@@ -911,14 +1788,57 @@
             inferred_confidence = middle_rel.confidence * confidence_factor
             
             # Add the inferred relation
-            self.add_relation(
-                source_id=source_id,
-                target_identifier=target_id,
-                relation_type=inferred_rel_type,
-                confidence=inferred_confidence,
-                metadata={"inferred_from_rule": rule["name"]},
-                inferred=True
-            )
+            try:
+                self.add_relation(
+                    source_id=source_id,
+                    target_identifier=target_id,
+                    relation_type=inferred_rel_type,
+                    confidence=inferred_confidence,
+                    metadata={"inferred_from_rule": rule["name"]},
+                    in def _apply_transitive_rule(self, source_id: str, middle_id: str, rule: Dict[str, Any]) -> None:
+        """
+        Apply a transitive inference rule.
+        
+        Args:
+            source_id: ID of the source concept
+            middle_id: ID of the middle concept
+            rule: The inference rule to apply
+        """
+        target_rel_type = rule["target_rel"]
+        inferred_rel_type = rule["inferred_rel"]
+        confidence_factor = rule["confidence_factor"]
+        
+        # Find relations from the middle concept that match the target relation type
+        if middle_id not in self.relations:
+            return
+            
+        for middle_rel in self.relations[middle_id]:
+            if middle_rel.relation_type != target_rel_type:
+                continue
+                
+            # Get the target concept
+            target_id = middle_rel.target_concept
+            
+            # Skip self-reference
+            if target_id == source_id:
+                continue
+                
+            # Calculate confidence for the inferred relation
+            inferred_confidence = middle_rel.confidence * confidence_factor
+            
+            # Add the inferred relation
+            try:
+                self.add_relation(
+                    source_id=source_id,
+                    target_identifier=target_id,
+                    relation_type=inferred_rel_type,
+                    confidence=inferred_confidence,
+                    metadata={"inferred_from_rule": rule["name"]},
+                    inferred=True
+                )
+            except ValueError:
+                # Skip if relation already exists or other issues
+                pass
     
     def _apply_inheritance_rule(self, source_id: str, parent_id: str, rule: Dict[str, Any]) -> None:
         """
@@ -959,14 +1879,18 @@
             inferred_confidence = parent_rel.confidence * confidence_factor
             
             # Add the inferred relation
-            self.add_relation(
-                source_id=source_id,
-                target_identifier=property_id,
-                relation_type=inferred_rel_type,
-                confidence=inferred_confidence,
-                metadata={"inferred_from_rule": rule["name"], "inherited_from": parent_id},
-                inferred=True
-            )
+            try:
+                self.add_relation(
+                    source_id=source_id,
+                    target_identifier=property_id,
+                    relation_type=inferred_rel_type,
+                    confidence=inferred_confidence,
+                    metadata={"inferred_from_rule": rule["name"], "inherited_from": parent_id},
+                    inferred=True
+                )
+            except ValueError:
+                # Skip if relation already exists or other issues
+                pass
     
     def _apply_contradiction_rule(self, source_id: str, opposite_id: str, rule: Dict[str, Any]) -> None:
         """
@@ -1005,66 +1929,19 @@
                         inferred_confidence = rel.confidence * opposite_rel.confidence * confidence_factor
                         
                         # Add the inferred relation
-                        self.add_relation(
-                            source_id=source_id,
-                            target_identifier=concept_id,
-                            relation_type=inferred_rel_type,
-                            confidence=inferred_confidence,
-                            metadata={"inferred_from_rule": rule["name"]},
-                            inferred=True
-                        )
-    
-    def add_word(self, term: str, meaning: str) -> str:
-        """
-        Add a term definition to the codex.
-        
-        Args:
-            term: The term to define
-            meaning: The definition or meaning
-            
-        Returns:
-            ID of the created concept
-        """
-        return self.record(
-            topic=term,
-            data={"definition": meaning},
-            concept_type=ConceptType.TERM
-        )
-    
-    def add_context(self, concept_id: str, context_type: str, context_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Add contextual information to a concept.
-        
-        Args:
-            concept_id: ID of the concept
-            context_type: Type of context (domains, temporal, perspectives, cultures)
-            context_data: Context information
-            
-        Returns:
-            Updated concept information
-        """
-        if concept_id not in self.entries:
-            raise ValueError(f"Concept with ID '{concept_id}' not found")
-            
-        # Prepare update data
-        if context_type not in ["domains", "temporal", "perspectives", "cultures"]:
-            raise ValueError(f"Invalid context type: {context_type}")
-            
-        updates = {
-            "context": {
-                context_type: context_data
-            }
-        }
-        
-        # Apply the update
-        updated_concept = self.update(
-            concept_id=concept_id,
-            updates=updates,
-            change_description=f"Added {context_type} context"
-        )
-        
-        return updated_concept
-    
+                        try:
+                            self.add_relation(
+                                source_id=source_id,
+                                target_identifier=concept_id,
+                                relation_type=inferred_rel_type,
+                                confidence=inferred_confidence,
+                                metadata={"inferred_from_rule": rule["name"]},
+                                inferred=True
+                            )
+                        except ValueError:
+                            # Skip if relation already exists or other issues
+                            pass
+
     def remove(self, concept_id: str) -> bool:
         """
         Remove a concept from the codex.
@@ -1106,6 +1983,16 @@
             if tag_lower in self.tag_index:
                 self.tag_index[tag_lower].discard(concept_id)
                 
+        # Remove from associations
+        if concept_id in self.associations:
+            # Remove references to this concept from other concepts' associations
+            for other_id in list(self.associations.keys()):
+                if concept_id in self.associations[other_id]:
+                    del self.associations[other_id][concept_id]
+            
+            # Remove the concept's associations
+            del self.associations[concept_id]
+                
         # Remove from clusters
         for cluster in self.concept_clusters.values():
             if concept_id in cluster.concepts:
@@ -1143,7 +2030,7 @@
             del self.version_history[concept_id]
             
         # Update system metadata
-        self.metadata["last_modified"] = datetime.datetime.now().timestamp()
+        self.metadata["last_modified"] = datetime.now().timestamp()
         
         return True
     
@@ -1508,7 +2395,7 @@
                 export_data["vectors"][concept_id] = vector.tolist()
         
         # Add export timestamp
-        export_data["export_timestamp"] = datetime.datetime.now().timestamp()
+        export_data["export_timestamp"] = datetime.now().timestamp()
         
         # Save to file if path provided
         if path:
@@ -1556,6 +2443,7 @@
             self.concept_clusters = {}
             self.version_history = {}
             self.access_stats = {}
+            self.associations = {}
         
         # Import entries
         imported_entries = 0
@@ -1582,8 +2470,8 @@
                 
             # Initialize access stats
             self.access_stats[concept_id] = AccessStatistics(
-                creation_time=entry.get("created", datetime.datetime.now().timestamp()),
-                last_accessed=datetime.datetime.now().timestamp()
+                creation_time=entry.get("created", datetime.now().timestamp()),
+                last_accessed=datetime.now().timestamp()
             )
             
             imported_entries += 1
@@ -1612,7 +2500,7 @@
                             relation_type=relation.relation_type,
                             target_concept=concept_id,
                             confidence=relation.confidence,
-                            metadata={**relation.metadata, "inverse": True},
+                            metadata={**relation.metadata, "inverse": True} if relation.metadata else {"inverse": True},
                             bidirectional=relation.bidirectional,
                             created=relation.created
                         )
@@ -1662,9 +2550,25 @@
                 if concept_id not in self.concept_vectors:
                     self.concept_vectors[concept_id] = self._generate_concept_vector(self.entries[concept_id])
                     imported_vectors += 1
+                    
+        # Import associations if available
+        imported_associations = 0
+        
+        if "associations" in data:
+            for concept_id, assocs in data["associations"].items():
+                if concept_id not in self.entries:
+                    continue
+                    
+                if concept_id not in self.associations:
+                    self.associations[concept_id] = {}
+                    
+                for related_id, assoc_data in assocs.items():
+                    if related_id in self.entries:
+                        self.associations[concept_id][related_id] = assoc_data
+                        imported_associations += 1
         
         # Update system metadata
-        self.metadata["last_modified"] = datetime.datetime.now().timestamp()
+        self.metadata["last_modified"] = datetime.now().timestamp()
         
         return {
             "imported_entries": imported_entries,
@@ -1672,6 +2576,7 @@
             "imported_versions": imported_versions,
             "imported_clusters": imported_clusters,
             "imported_vectors": imported_vectors,
+            "imported_associations": imported_associations,
             "total_entries": len(self.entries),
             "total_relations": sum(len(rels) for rels in self.relations.values())
         }
@@ -1751,20 +2656,24 @@
                 
                 if co_occurrences:
                     # Create a generic relation
-                    relation = self.add_relation(
-                        source_id=concept1["id"],
-                        target_identifier=concept2["id"],
-                        relation_type=RelationType.RELATED_TO,
-                        confidence=0.6,
-                        metadata={"co_occurrences": len(co_occurrences), "auto_extracted": True}
-                    )
-                    
-                    inferred_relations.append({
-                        "source": concept1["topic"],
-                        "target": concept2["topic"],
-                        "type": RelationType.RELATED_TO.value,
-                        "co_occurrences": len(co_occurrences)
-                    })
+                    try:
+                        relation = self.add_relation(
+                            source_id=concept1["id"],
+                            target_identifier=concept2["id"],
+                            relation_type=RelationType.RELATED_TO.value,
+                            confidence=0.6,
+                            metadata={"co_occurrences": len(co_occurrences), "auto_extracted": True}
+                        )
+                        
+                        inferred_relations.append({
+                            "source": concept1["topic"],
+                            "target": concept2["topic"],
+                            "type": RelationType.RELATED_TO.value,
+                            "co_occurrences": len(co_occurrences)
+                        })
+                    except ValueError:
+                        # Skip if relation already exists or other issues
+                        pass
         
         # Generate a simple cluster if enough concepts were extracted
         cluster_id = None
@@ -1785,7 +2694,7 @@
             "inferred_relations": inferred_relations,
             "cluster_id": cluster_id,
             "text_length": len(text),
-            "analysis_timestamp": datetime.datetime.now().timestamp()
+            "analysis_timestamp": datetime.now().timestamp()
         }
     
     def merge_concepts(self, primary_id: str, secondary_id: str,
@@ -1906,7 +2815,7 @@
                         target_identifier=relation.target_concept,
                         relation_type=relation.relation_type,
                         confidence=relation.confidence,
-                        metadata={**relation.metadata, "merged_from": secondary_id},
+                        metadata={**relation.metadata, "merged_from": secondary_id} if relation.metadata else {"merged_from": secondary_id},
                         bidirectional=relation.bidirectional
                     )
                     relations_transferred += 1
@@ -1915,6 +2824,37 @@
         
         if relations_transferred > 0:
             merge_summary["changes"].append(f"Transferred {relations_transferred} relations from secondary concept")
+        
+        # Transfer associations
+        associations_transferred = 0
+        
+        if secondary_id in self.associations:
+            for related_id, assoc_data in self.associations[secondary_id].items():
+                # Skip references to primary
+                if related_id == primary_id:
+                    continue
+                    
+                # Add association to primary
+                if related_id not in self.associations.get(primary_id, {}):
+                    if primary_id not in self.associations:
+                        self.associations[primary_id] = {}
+                        
+                    self.associations[primary_id][related_id] = {
+                        **assoc_data,
+                        "from_merged": secondary_id
+                    }
+                    
+                    # Update related concept's associations
+                    if related_id in self.associations:
+                        self.associations[related_id][primary_id] = {
+                            **assoc_data,
+                            "from_merged": secondary_id
+                        }
+                        
+                    associations_transferred += 1
+        
+        if associations_transferred > 0:
+            merge_summary["changes"].append(f"Transferred {associations_transferred} associations from secondary concept")
         
         # Update clusters to replace secondary with primary
         clusters_updated = 0
@@ -2008,7 +2948,7 @@
                 "id": concept_id,
                 "topic": concept["topic"],
                 "created": timestamp,
-                "date": datetime.datetime.fromtimestamp(timestamp).isoformat()
+                "date": datetime.fromtimestamp(timestamp).isoformat()
             })
             
         newest_concepts = []
@@ -2018,7 +2958,7 @@
                 "id": concept_id,
                 "topic": concept["topic"],
                 "created": timestamp,
-                "date": datetime.datetime.fromtimestamp(timestamp).isoformat()
+                "date": datetime.fromtimestamp(timestamp).isoformat()
             })
             
         # Calculate confidence distribution
@@ -2048,7 +2988,7 @@
             "confidence_distribution": confidence_distribution,
             "clusters": len(self.concept_clusters),
             "contradictions": len(self.contradictions),
-            "timestamp": datetime.datetime.now().timestamp()
+            "timestamp": datetime.now().timestamp()
         }
         
     def update_importance_scores(self) -> Dict[str, Any]:
@@ -2071,7 +3011,7 @@
             
             # Consider recency (higher if accessed recently)
             if stats.last_accessed:
-                time_diff = datetime.datetime.now().timestamp() - stats.last_accessed
+                time_diff = datetime.now().timestamp() - stats.last_accessed
                 days_diff = time_diff / (60 * 60 * 24)  # Convert to days
                 recency_factor = max(0.0, 1.0 - (days_diff / 30))  # Decay over 30 days
                 
@@ -2095,7 +3035,7 @@
         
         return {
             "updated_count": updated_count,
-            "timestamp": datetime.datetime.now().timestamp()
+            "timestamp": datetime.now().timestamp()
         }
 
     def __len__(self) -> int:
@@ -2126,4 +3066,4 @@
         return normalized in self.terms
 
 # Create a global instance for easy access
-codex = EnhancedCodex()
+codex = SullyCodex()
