@@ -169,6 +169,322 @@ class Sully:
             Initialized component or None
         """
         try:
+            images_info = self.pdf_reader.extract_images(pdf_path, output_dir)
+            
+            if not images_info:
+                return "No images were found or extracted from the PDF."
+                
+            # Generate a summary
+            summary = f"Extracted {len(images_info)} images from {pdf_path}:\n"
+            for i, img in enumerate(images_info[:5]):  # Show details for first 5 images
+                summary += f"- Image {i+1}: Page {img['page']}, {img['width']}x{img['height']} ({img['format']})\n"
+                
+            if len(images_info) > 5:
+                summary += f"- ...and {len(images_info) - 5} more images\n"
+                
+            summary += f"\nAll images saved to: {output_dir}"
+            return summary
+        except Exception as e:
+            self.logger.error(f"PDF image extraction error: {str(e)}")
+            return f"Error extracting images: {str(e)}"
+
+    def word_count(self):
+        """Return the number of concepts in Sully's lexicon."""
+        self._track_module_access("codex")
+        
+        try:
+            if self.codex:
+                return len(self.codex)
+            else:
+                # Fallback estimation based on knowledge base
+                return len(self.knowledge) * 100
+        except Exception as e:
+            self.logger.error(f"Word count error: {str(e)}")
+            return len(self.knowledge) * 100
+            
+    def define_word(self, term, meaning):
+        """
+        Add a new concept to Sully's conceptual framework.
+        This expands her ability to understand and communicate.
+        
+        Args:
+            term: Term to define
+            meaning: Meaning of the term
+            
+        Returns:
+            Status and associations
+        """
+        self._track_module_access("codex")
+        
+        try:
+            if not self.codex:
+                return {"status": "error", "message": "Codex not available"}
+                
+            self.codex.add_word(term, meaning)
+            
+            # Create associations with existing knowledge
+            associations = self.reasoning_node.reason(
+                f"Explore how the concept of '{term}' relates to existing knowledge", 
+                "analytical"
+            )
+            
+            # Store definition in memory if available
+            if self.memory_integration:
+                try:
+                    self.memory_integration.store_experience(
+                        content=f"Definition: {term} - {meaning}",
+                        source="definition",
+                        importance=0.8,
+                        concepts=[term],
+                        emotional_tags={"interest": 0.7}
+                    )
+                except Exception as e:
+                    self.logger.error(f"Memory storage error: {str(e)}")
+            
+            return {"status": "concept integrated", "term": term, "associations": associations}
+        except Exception as e:
+            self.logger.error(f"Word definition error: {str(e)}")
+            return {"status": "concept noted", "term": term, "note": str(e)}
+    
+    def search_memory(self, query, limit=5):
+        """
+        Search through Sully's memory system for related content.
+        
+        Args:
+            query: Search query
+            limit: Maximum number of results to return
+            
+        Returns:
+            Search results
+        """
+        self._track_module_access("memory")
+        
+        if self.memory_integration:
+            try:
+                results = self.memory_integration.recall(
+                    query=query,
+                    limit=limit,
+                    include_emotional=True
+                )
+                return results
+            except Exception as e:
+                self.logger.error(f"Memory search error: {str(e)}")
+                # Fallback to basic memory search
+                try:
+                    return self.memory.search(query, limit=limit)
+                except Exception as fallback_e:
+                    self.logger.error(f"Fallback memory search error: {str(fallback_e)}")
+                    return [{"error": f"Memory search error: {str(e)}"}]
+        else:
+            # Legacy memory search
+            try:
+                results = self.memory.search(query, limit=limit)
+                return results
+            except Exception as e:
+                self.logger.error(f"Memory search error: {str(e)}")
+                return [{"error": f"Memory search error: {str(e)}"}]
+    
+    def get_memory_status(self):
+        """
+        Get information about Sully's memory system status.
+        
+        Returns:
+            Memory system status
+        """
+        self._track_module_access("memory")
+        
+        if self.memory_integration:
+            try:
+                return self.memory_integration.get_memory_stats()
+            except Exception as e:
+                self.logger.error(f"Memory status error: {str(e)}")
+                return {"error": f"Unable to retrieve memory statistics: {str(e)}"}
+        else:
+            return {"status": "Basic memory system active, integration not enabled"}
+    
+    def analyze_emotional_context(self):
+        """
+        Analyze the current emotional context in Sully's memory.
+        
+        Returns:
+            Emotional context analysis
+        """
+        self._track_module_access("memory")
+        
+        if self.memory_integration:
+            try:
+                return self.memory_integration.get_emotional_context()
+            except Exception as e:
+                self.logger.error(f"Emotional context error: {str(e)}")
+                return {"error": f"Unable to analyze emotional context: {str(e)}"}
+        else:
+            return {"status": "Emotional context analysis requires memory integration"}
+    
+    def generate_multi_perspective(self, topic, perspectives):
+        """
+        Generate perspectives on a topic from multiple viewpoints.
+        
+        Args:
+            topic: Topic to analyze
+            perspectives: List of perspectives to use
+            
+        Returns:
+            Multi-perspective analysis
+        """
+        self._track_module_access("reasoning_node")
+        
+        responses = {}
+        
+        # Create an episodic memory context if integration is available
+        episode_id = None
+        if self.memory_integration:
+            try:
+                episode_id = self.memory_integration.begin_episode(
+                    f"Multi-perspective analysis of: {topic}",
+                    "analysis"
+                )
+            except Exception as e:
+                self.logger.error(f"Episodic memory initialization error: {str(e)}")
+        
+        # Generate responses for each perspective
+        for perspective in perspectives:
+            try:
+                response = self.reason(topic, perspective)
+                responses[perspective] = response
+                
+                # Store in memory if integration is available
+                if self.memory_integration and episode_id:
+                    try:
+                        self.memory_integration.store_interaction(
+                            f"Analyze {topic} from {perspective} perspective",
+                            response,
+                            "perspective_analysis",
+                            {"perspective": perspective, "episodic_context": episode_id}
+                        )
+                    except Exception as e:
+                        self.logger.error(f"Memory interaction storage error: {str(e)}")
+            except Exception as e:
+                self.logger.error(f"Perspective generation error for '{perspective}': {str(e)}")
+                responses[perspective] = f"Could not generate {perspective} perspective: {str(e)}"
+        
+        # Close the episodic context if it was created
+        if self.memory_integration and episode_id:
+            try:
+                summary = f"Completed multi-perspective analysis of '{topic}' using {len(perspectives)} cognitive perspectives"
+                self.memory_integration.end_episode(summary)
+            except Exception as e:
+                self.logger.error(f"Episodic memory closure error: {str(e)}")
+        
+        return {"topic": topic, "perspectives": responses}
+    
+    def logical_reasoning(self, query, framework="PROPOSITIONAL"):
+        """
+        Apply formal logical reasoning to a query using the Logic Kernel.
+        
+        Args:
+            query: The query to reason about
+            framework: Logical framework to use (PROPOSITIONAL, FIRST_ORDER, etc.)
+            
+        Returns:
+            Logical reasoning results
+        """
+        self._track_module_access("logic_kernel")
+        
+        if not self.logic_kernel:
+            # Fall back to standard reasoning if logic kernel not available
+            return self.reason(
+                f"Apply logical analysis with formal reasoning to: {query}",
+                "analytical"
+            )
+        
+        # Create episodic memory context if memory integration is available
+        episode_id = None
+        if self.memory_integration:
+            try:
+                episode_id = self.memory_integration.begin_episode(
+                    f"Formal logical reasoning: {query[:50]}...",
+                    "logical_reasoning"
+                )
+            except Exception as e:
+                self.logger.error(f"Episodic memory initialization error: {str(e)}")
+        
+        try:
+            # First, query the knowledge base
+            query_result = self.logic_kernel.query(query)
+            
+            # If the statement is already known, return its truth value
+            if query_result.get("found", False):
+                result = {
+                    "result": True,
+                    "statement": query,
+                    "truth": query_result.get("truth"),
+                    "confidence": query_result.get("confidence", 1.0),
+                    "explanation": "Statement found in knowledge base"
+                }
+            else:
+                # Try to infer the statement
+                inference_result = self.logic_kernel.infer(query)
+                
+                if inference_result.get("result", False):
+                    # Statement was inferred
+                    result = inference_result
+                else:
+                    # Statement could not be inferred
+                    # Try abductive reasoning for possible explanations
+                    abductive_result = self.logic_kernel.infer(query, "ABDUCTION")
+                    
+                    if abductive_result.get("result") == "abductive":
+                        result = abductive_result
+                    else:
+                        # Fall back to reasoning node for an explanation
+                        fallback = self.reasoning_node.reason(
+                            f"Analyze the logical statement: {query}",
+                            "analytical"
+                        )
+                        
+                        result = {
+                            "result": False,
+                            "statement": query,
+                            "explanation": "Could not prove or infer statement",
+                            "reasoning": fallback
+                        }
+            
+            # Store the interaction in memory if available
+            if self.memory_integration and episode_id:
+                try:
+                    self.memory_integration.store_interaction(
+                        query,
+                        str(result),
+                        "logical_reasoning",
+                        {"episode_id": episode_id, "logical_framework": framework}
+                    )
+                    
+                    # End the episode
+                    self.memory_integration.end_episode(
+                        f"Completed logical reasoning for: {query[:50]}..."
+                    )
+                except Exception as e:
+                    self.logger.error(f"Memory interaction storage error: {str(e)}")
+            
+            return result
+        
+        except Exception as e:
+            self.logger.error(f"Logical reasoning error: {str(e)}")
+            
+            # Close the episodic context if it was created
+            if self.memory_integration and episode_id:
+                try:
+                    self.memory_integration.end_episode(
+                        f"Error in logical reasoning: {str(e)}"
+                    )
+                except Exception as episode_e:
+                    self.logger.error(f"Episodic memory closure error: {str(episode_e)}")
+            
+            # Fall back to standard reasoning
+            return self.reason(
+                f"Analyze the logical statement: {query}",
+                "analytical"
+            )
             component = init_func()
             return component
         except Exception as e:
@@ -1041,34 +1357,34 @@ class Sully:
                 self.logger.error(f"Language enhancement error: {str(e)}")
         
         try:
-    if not self.reasoning_node:
-        raise AttributeError("Reasoning node not available")
-        
-    # Attempt standard reasoning with the requested tone
-    result = self.reasoning_node.reason(message, tone)
-    
-    # Apply identity transformation if available
-    if self.identity and hasattr(self.identity, 'align_response'):
-        result = self.identity.align_response(result, tone)
-        
-    # Post-processing hook
-    result = self._execute_hooks("after_reasoning", result)
-    
-    return result
-except Exception as e:
-    self.logger.error(f"Standard reasoning error with tone '{tone}': {str(e)}")
-    
-    # If specific tone fails, fall back to emergent reasoning
-    if tone != "emergent" and self.reasoning_node:
-        try:
-            return self.reasoning_node.reason(message, "emergent")
-        except Exception as emergent_e:
-            self.logger.error(f"Emergent reasoning fallback error: {str(emergent_e)}")
-            # Even if all reasoning fails, attempt to respond
-            return f"Contemplating '{message}' leads to new cognitive terrain... {str(e)}"
-    else:
-        # Direct emergent failure
-        return f"Contemplating '{message}' leads to new cognitive terrain... {str(e)}"
+            if not self.reasoning_node:
+                raise AttributeError("Reasoning node not available")
+                
+            # Attempt standard reasoning with the requested tone
+            result = self.reasoning_node.reason(message, tone)
+            
+            # Apply identity transformation if available
+            if self.identity and hasattr(self.identity, 'align_response'):
+                result = self.identity.align_response(result, tone)
+                
+            # Post-processing hook
+            result = self._execute_hooks("after_reasoning", result)
+            
+            return result
+        except Exception as e:
+            self.logger.error(f"Standard reasoning error with tone '{tone}': {str(e)}")
+            
+            # If specific tone fails, fall back to emergent reasoning
+            if tone != "emergent" and self.reasoning_node:
+                try:
+                    return self.reasoning_node.reason(message, "emergent")
+                except Exception as emergent_e:
+                    self.logger.error(f"Emergent reasoning fallback error: {str(emergent_e)}")
+                    # Even if all reasoning fails, attempt to respond
+                    return f"Contemplating '{message}' leads to new cognitive terrain... {str(e)}"
+            else:
+                # Direct emergent failure
+                return f"Contemplating '{message}' leads to new cognitive terrain... {str(e)}"
 
     def remember(self, message):
         """
@@ -1677,320 +1993,4 @@ except Exception as e:
         if not self.pdf_reader:
             return "PDF processing capabilities are not available."
 
-       try:
-            images_info = self.pdf_reader.extract_images(pdf_path, output_dir)
-            
-            if not images_info:
-                return "No images were found or extracted from the PDF."
-                
-            # Generate a summary
-            summary = f"Extracted {len(images_info)} images from {pdf_path}:\n"
-            for i, img in enumerate(images_info[:5]):  # Show details for first 5 images
-                summary += f"- Image {i+1}: Page {img['page']}, {img['width']}x{img['height']} ({img['format']})\n"
-                
-            if len(images_info) > 5:
-                summary += f"- ...and {len(images_info) - 5} more images\n"
-                
-            summary += f"\nAll images saved to: {output_dir}"
-            return summary
-        except Exception as e:
-            self.logger.error(f"PDF image extraction error: {str(e)}")
-            return f"Error extracting images: {str(e)}"
-
-    def word_count(self):
-        """Return the number of concepts in Sully's lexicon."""
-        self._track_module_access("codex")
-        
         try:
-            if self.codex:
-                return len(self.codex)
-            else:
-                # Fallback estimation based on knowledge base
-                return len(self.knowledge) * 100
-        except Exception as e:
-            self.logger.error(f"Word count error: {str(e)}")
-            return len(self.knowledge) * 100
-            
-    def define_word(self, term, meaning):
-        """
-        Add a new concept to Sully's conceptual framework.
-        This expands her ability to understand and communicate.
-        
-        Args:
-            term: Term to define
-            meaning: Meaning of the term
-            
-        Returns:
-            Status and associations
-        """
-        self._track_module_access("codex")
-        
-        try:
-            if not self.codex:
-                return {"status": "error", "message": "Codex not available"}
-                
-            self.codex.add_word(term, meaning)
-            
-            # Create associations with existing knowledge
-            associations = self.reasoning_node.reason(
-                f"Explore how the concept of '{term}' relates to existing knowledge", 
-                "analytical"
-            )
-            
-            # Store definition in memory if available
-            if self.memory_integration:
-                try:
-                    self.memory_integration.store_experience(
-                        content=f"Definition: {term} - {meaning}",
-                        source="definition",
-                        importance=0.8,
-                        concepts=[term],
-                        emotional_tags={"interest": 0.7}
-                    )
-                except Exception as e:
-                    self.logger.error(f"Memory storage error: {str(e)}")
-            
-            return {"status": "concept integrated", "term": term, "associations": associations}
-        except Exception as e:
-            self.logger.error(f"Word definition error: {str(e)}")
-            return {"status": "concept noted", "term": term, "note": str(e)}
-    
-    def search_memory(self, query, limit=5):
-        """
-        Search through Sully's memory system for related content.
-        
-        Args:
-            query: Search query
-            limit: Maximum number of results to return
-            
-        Returns:
-            Search results
-        """
-        self._track_module_access("memory")
-        
-        if self.memory_integration:
-            try:
-                results = self.memory_integration.recall(
-                    query=query,
-                    limit=limit,
-                    include_emotional=True
-                )
-                return results
-            except Exception as e:
-                self.logger.error(f"Memory search error: {str(e)}")
-                # Fallback to basic memory search
-                try:
-                    return self.memory.search(query, limit=limit)
-                except Exception as fallback_e:
-                    self.logger.error(f"Fallback memory search error: {str(fallback_e)}")
-                    return [{"error": f"Memory search error: {str(e)}"}]
-        else:
-            # Legacy memory search
-            try:
-                results = self.memory.search(query, limit=limit)
-                return results
-            except Exception as e:
-                self.logger.error(f"Memory search error: {str(e)}")
-                return [{"error": f"Memory search error: {str(e)}"}]
-    
-    def get_memory_status(self):
-        """
-        Get information about Sully's memory system status.
-        
-        Returns:
-            Memory system status
-        """
-        self._track_module_access("memory")
-        
-        if self.memory_integration:
-            try:
-                return self.memory_integration.get_memory_stats()
-            except Exception as e:
-                self.logger.error(f"Memory status error: {str(e)}")
-                return {"error": f"Unable to retrieve memory statistics: {str(e)}"}
-        else:
-            return {"status": "Basic memory system active, integration not enabled"}
-    
-    def analyze_emotional_context(self):
-        """
-        Analyze the current emotional context in Sully's memory.
-        
-        Returns:
-            Emotional context analysis
-        """
-        self._track_module_access("memory")
-        
-        if self.memory_integration:
-            try:
-                return self.memory_integration.get_emotional_context()
-            except Exception as e:
-                self.logger.error(f"Emotional context error: {str(e)}")
-                return {"error": f"Unable to analyze emotional context: {str(e)}"}
-        else:
-            return {"status": "Emotional context analysis requires memory integration"}
-    
-    def generate_multi_perspective(self, topic, perspectives):
-        """
-        Generate perspectives on a topic from multiple viewpoints.
-        
-        Args:
-            topic: Topic to analyze
-            perspectives: List of perspectives to use
-            
-        Returns:
-            Multi-perspective analysis
-        """
-        self._track_module_access("reasoning_node")
-        
-        responses = {}
-        
-        # Create an episodic memory context if integration is available
-        episode_id = None
-        if self.memory_integration:
-            try:
-                episode_id = self.memory_integration.begin_episode(
-                    f"Multi-perspective analysis of: {topic}",
-                    "analysis"
-                )
-            except Exception as e:
-                self.logger.error(f"Episodic memory initialization error: {str(e)}")
-        
-        # Generate responses for each perspective
-        for perspective in perspectives:
-            try:
-                response = self.reason(topic, perspective)
-                responses[perspective] = response
-                
-                # Store in memory if integration is available
-                if self.memory_integration and episode_id:
-                    try:
-                        self.memory_integration.store_interaction(
-                            f"Analyze {topic} from {perspective} perspective",
-                            response,
-                            "perspective_analysis",
-                            {"perspective": perspective, "episodic_context": episode_id}
-                        )
-                    except Exception as e:
-                        self.logger.error(f"Memory interaction storage error: {str(e)}")
-            except Exception as e:
-                self.logger.error(f"Perspective generation error for '{perspective}': {str(e)}")
-                responses[perspective] = f"Could not generate {perspective} perspective: {str(e)}"
-        
-        # Close the episodic context if it was created
-        if self.memory_integration and episode_id:
-            try:
-                summary = f"Completed multi-perspective analysis of '{topic}' using {len(perspectives)} cognitive perspectives"
-                self.memory_integration.end_episode(summary)
-            except Exception as e:
-                self.logger.error(f"Episodic memory closure error: {str(e)}")
-        
-        return {"topic": topic, "perspectives": responses}
-    
-    def logical_reasoning(self, query, framework="PROPOSITIONAL"):
-        """
-        Apply formal logical reasoning to a query using the Logic Kernel.
-        
-        Args:
-            query: The query to reason about
-            framework: Logical framework to use (PROPOSITIONAL, FIRST_ORDER, etc.)
-            
-        Returns:
-            Logical reasoning results
-        """
-        self._track_module_access("logic_kernel")
-        
-        if not self.logic_kernel:
-            # Fall back to standard reasoning if logic kernel not available
-            return self.reason(
-                f"Apply logical analysis with formal reasoning to: {query}",
-                "analytical"
-            )
-        
-        # Create episodic memory context if memory integration is available
-        episode_id = None
-        if self.memory_integration:
-            try:
-                episode_id = self.memory_integration.begin_episode(
-                    f"Formal logical reasoning: {query[:50]}...",
-                    "logical_reasoning"
-                )
-            except Exception as e:
-                self.logger.error(f"Episodic memory initialization error: {str(e)}")
-        
-        try:
-            # First, query the knowledge base
-            query_result = self.logic_kernel.query(query)
-            
-            # If the statement is already known, return its truth value
-            if query_result.get("found", False):
-                result = {
-                    "result": True,
-                    "statement": query,
-                    "truth": query_result.get("truth"),
-                    "confidence": query_result.get("confidence", 1.0),
-                    "explanation": "Statement found in knowledge base"
-                }
-            else:
-                # Try to infer the statement
-                inference_result = self.logic_kernel.infer(query)
-                
-                if inference_result.get("result", False):
-                    # Statement was inferred
-                    result = inference_result
-                else:
-                    # Statement could not be inferred
-                    # Try abductive reasoning for possible explanations
-                    abductive_result = self.logic_kernel.infer(query, "ABDUCTION")
-                    
-                    if abductive_result.get("result") == "abductive":
-                        result = abductive_result
-                    else:
-                        # Fall back to reasoning node for an explanation
-                        fallback = self.reasoning_node.reason(
-                            f"Analyze the logical statement: {query}",
-                            "analytical"
-                        )
-                        
-                        result = {
-                            "result": False,
-                            "statement": query,
-                            "explanation": "Could not prove or infer statement",
-                            "reasoning": fallback
-                        }
-            
-            # Store the interaction in memory if available
-            if self.memory_integration and episode_id:
-                try:
-                    self.memory_integration.store_interaction(
-                        query,
-                        str(result),
-                        "logical_reasoning",
-                        {"episode_id": episode_id, "logical_framework": framework}
-                    )
-                    
-                    # End the episode
-                    self.memory_integration.end_episode(
-                        f"Completed logical reasoning for: {query[:50]}..."
-                    )
-                except Exception as e:
-                    self.logger.error(f"Memory interaction storage error: {str(e)}")
-            
-            return result
-        
-        except Exception as e:
-            self.logger.error(f"Logical reasoning error: {str(e)}")
-            
-            # Close the episodic context if it was created
-            if self.memory_integration and episode_id:
-                try:
-                    self.memory_integration.end_episode(
-                        f"Error in logical reasoning: {str(e)}"
-                    )
-                except Exception as episode_e:
-                    self.logger.error(f"Episodic memory closure error: {str(episode_e)}")
-            
-            # Fall back to standard reasoning
-            return self.reason(
-                f"Analyze the logical statement: {query}",
-                "analytical"
-            )
